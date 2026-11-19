@@ -133,17 +133,17 @@ List the files you find in `bronze/taxi_trips/_delta_log/` (first 3 names) and s
 
 | Question | Your number |
 |---|---|
-| Total Bronze rows | |
-| Earliest pickup timestamp | |
-| Latest pickup timestamp | |
-| Pickups outside the month of their own file | |
-| Rows with dropoff ≤ pickup | |
-| Rows with distance ≤ 0 | |
-| Rows with fare ≤ 0 | |
-| Null count of `passenger_count` | |
+| Total Bronze rows | 12,253,805 |
+| Earliest pickup timestamp | 2009-01-01T12:52:15.000+00:00 |
+| Latest pickup timestamp | 2025-11-01T00:32:12.000+00:00 |
+| Pickups outside the month of their own file | 37 |
+| Rows with dropoff ≤ pickup | 172980 |
+| Rows with distance ≤ 0 | 355266 |
+| Rows with fare ≤ 0 | 840442 |
+| Null count of `passenger_count` | 2944316 |
 
-Which columns share exactly the same large null count? ______________________________________
-Which `payment_type` value has that same row count? ______ What does that payment type mean (see Step 3 table)?
+Which columns share exactly the same large null count? `passenger_count`, `RatecodeID`, `store_and_fwd_flag`, `congestion_surcharge`, `Airport_fee`
+Which `payment_type` value has that same row count? 0 What does that payment type mean (see Step 3 table)? `0` stands for Flex Fare
 
 > **Why** do those columns all go null together? What does it tell you about those rows?
 > _your answer_
@@ -154,12 +154,12 @@ Which `payment_type` value has that same row count? ______ What does that paymen
 
 | `reject_reason` | Rows rejected | One example row (pickup, dropoff, distance, fare) | Why this row is not a real, usable trip |
 |---|---|---|---|
-| `pickup_outside_source_month` | | | |
-| `dropoff_not_after_pickup` | | | |
-| `duration_over_6h` | | | |
-| `distance_invalid` | | | |
-| `fare_invalid` | | | |
-| **Total rejected** | | | |
+| `pickup_outside_source_month` | 37 | 2009-01-01 12:52:15, 2009-01-01 13:12:15, 2.13, 18.4 | The trip's pickup timestamp falls outside the month |
+| `dropoff_not_after_pickup` | 172980 | 2025-08-01 00:01:09, 2025-08-01 00:01:09, 0.0, 3.0 | The dropoff time is before or equal to pickup |
+| `duration_over_6h` | 3490 | 2025-08-01 00:05:51, 2025-08-01 23:48:57, 1.71, 10.7 | Lasting over 6 hours |
+| `distance_invalid` | 351499 | 2025-08-01 00:00:56, 2025-08-01 00:01:01, 0.0, 3.0 | A trip distance of zero or negative cannot represent as valid |
+| `fare_invalid` | 766477 | 2025-08-01 00:00:03, 2025-08-01 00:13:11, 1.76, -4.75 | Negative or zero fares are invalid |
+| **Total rejected** | 1294483 | | |
 
 **Decision 1:** Millions of rows have a null `passenger_count`. We did **not** reject them. Why not? What would the business lose if we had?
 
@@ -185,15 +185,15 @@ Fill the before/after table for **seven** columns of your choice from `silver.ta
 
 | Bronze column and type | Silver column and type | What changed and why |
 |---|---|---|
-| | | |
-| | | |
-| | | |
-| | | |
-| | | |
-| | | |
-| | | |
+| `passenger_count` (`double`) | `integer` | Converted to a whole number since passenger counts can't be fractions; nulls are kept for app rides. |
+| `fare_amount` (`double`) | `decimal(10,2)` | Changed to a decimal with 2 decimal places for accurate money math and to avoid rounding errors. |
+| `store_and_fwd_flag` (`string`) | `string` | Cleaned and standardized to ensure consistent flags (like `Y` or `N`). |
+| `trip_distance` (`double`) | `decimal(10,2)` | Converted to decimal for precise mileage and distance tracking. |
+| `tpep_pickup_datetime` (`timestamp`) | `timestamp` | Kept as a timestamp so we can easily track when the trip started and group by date. |
+| `RatecodeID` (`double`) | `integer` | Cast to an integer because rate codes represent whole-number categories. |
+| `total_amount` (`double`) | `decimal(10,2)` | Converted to a decimal with 2 decimal places for accurate financial totals. |
 
-Silver rows per month: Aug ______ Sep ______ Oct ______  
+Silver rows per month: Aug 3179661  Sep 3837040  Oct 3942621  
 Silver rows with a NULL `passenger_count`: ______ (compare with the Bronze null count in §5 and explain the difference)
 
 **Why** decimal for money and not double? Give one concrete example of what can go wrong with double.
@@ -216,9 +216,9 @@ Weather in Silver: rows ______, rainy days ______ (`is_rainy = true`), dry days 
 
 | Bronze rows | Silver rows | Rejected rows | Duplicates removed | Bronze − (Silver + Rejected + Duplicates) |
 |---|---|---|---|---|
-| | | | | **must be 0** |
+| 12,253,805 | 10,959,322 | 1,294,483 | 0 | 0 |
 
-Percentage of Bronze rows that were rejected: ______ %
+Percentage of Bronze rows that were rejected: **10.56 %**
 
 **Why** is "rows in = rows out + rows rejected" the first thing a data engineer checks after building a layer? Describe one real situation where it would have caught a bug.
 
@@ -231,13 +231,22 @@ Percentage of Bronze rows that were rejected: ______ %
 Paste the SQL you wrote (rainy vs dry days, joined on date):
 
 ```sql
--- your query
+SELECT 
+    w.is_rainy,
+    COUNT(DISTINCT w.date) AS days,
+    COUNT(t.trip_id) AS trips,
+    ROUND(COUNT(t.trip_id) / COUNT(DISTINCT w.date), 0) AS trips_per_day
+FROM silver.weather_daily w
+LEFT JOIN silver.taxi_trips t 
+    ON DATE(t.pickup_datetime) = w.date
+GROUP BY w.is_rainy
+ORDER BY w.is_rainy;
 ```
 
 | is_rainy | Days | Trips | Trips per day |
 |---|---|---|---|
-| false | | | |
-| true | | | |
+| false | | 8268051 | 118115.01 |
+| true | | 2691271 | 122330.5 |
 
 In one sentence: what does this number *not* prove? (Hint: how many rainy days are there, and what else changes on those days?)
 
@@ -251,8 +260,8 @@ At least **two** real errors or surprises from your own run (not the ones in the
 
 | What I saw (paste the error line) | Why it happened | How I fixed it | Time lost |
 |---|---|---|---|
-| | | | |
-| | | | |
+| `LocalFilesystemAccessDeniedException: Cannot access non /Workspace local filesystem path: file:/tmp/...` | Databricks serverless blocks `dbutils.fs.cp` from reading temporary files written to the driver's local `/tmp/` disk, and `dbutils.fs.put` only accepts text, not binary Parquet bytes. | Wrote the DataFrame to a temporary folder in ADLS using `coalesce(1)`, copied the single generated `part-*.parquet` file to the final target path with `dbutils.fs.cp`, and deleted the temp folder. |  |
+| `❌ bronze.taxi_trips is an EXTERNAL table` (8 of 10 checks passed) | Calling `.saveAsTable("bronze.taxi_trips")` without specifying a storage path created a managed table in Unity Catalog instead of an external table pointing to ADLS. | Added `.option("path", f"{BASE}/bronze/taxi_trips")` to the Delta write command and recreated the table, bringing the validation score to 10/10. | 15 mins |
 
 ---
 
@@ -265,12 +274,12 @@ At least **two** real errors or surprises from your own run (not the ones in the
 5. Your colleague drops the table `silver.taxi_trips`. Is the data gone? How do you bring the table back?
 6. A new month (2025-11) arrives. List exactly what you would change or run to add it, in order.
 
-> **1.**
-> **2.**
-> **3.**
-> **4.**
-> **5.**
-> **6.**
+> **1.** Silver's job is to clean up raw Bronze data, fix data types, and filter out bad rows so the data is trustworthy and easy to query or join.
+> **2.** Bronze keeps a original copy of what arrived from the source because it easier to check what went wrong later or re-process the data if rules change.
+> **3.** Rejecting throws out a bad row, like a trip with a zero or negative fare. Fixing changes how a value is stored without losing the row, like changing fare_amount from a double to a decimal for money. Keeping a null leaves an empty value alone when it makes sense, like keeping NULL in passenger_count for app-booked rides.
+> **4.** Re-running it is safe because it cleanly overwrites the target data instead of duplicating it.
+> **5.** The actual files in ADLS are still safe because it is an external table. The table can be bring back just by registering it again at that same ADLS path.
+> **6.** Add 2025-11 to MONTHS, Run Notebook 1 to download the new file and load it into Bronze. Run Notebook 2 to filter out bad rows, update Silver, and check the counts.
 
 ---
 
